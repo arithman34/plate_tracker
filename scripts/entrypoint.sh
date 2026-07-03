@@ -2,7 +2,7 @@
 set -e
 
 echo "Running migrations..."
-uv run alembic upgrade head
+.venv/bin/alembic upgrade head
 
 echo "Starting API..."
-exec uv run uvicorn api.main:app --host 0.0.0.0 --port 8000
+exec .venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8000

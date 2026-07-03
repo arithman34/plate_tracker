@@ -16,4 +16,4 @@ RUN uv sync --frozen --no-dev
 
 COPY . .
 
-CMD ["uv", "run", "celery", "-A", "worker.celery_app.celery_app", "worker", "-Q", "jobs", "--loglevel=info"]
+CMD [".venv/bin/celery", "-A", "worker.celery_app.celery_app", "worker", "-Q", "jobs", "--loglevel=info"]
