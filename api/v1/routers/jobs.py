@@ -2,7 +2,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -23,15 +23,17 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     video: UploadFile,
-    bbox: str,
-    mass_kg: float | None = None,
+    bbox: str = Form(...),
+    mass_kg: float | None = Form(None),
     api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> JobResponse:
     result = await db.execute(select(User).where(User.id == api_key.user_id))
     user = result.scalar_one_or_none()
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
+        )
 
     if user.credits < 1:
         raise HTTPException(
@@ -45,7 +47,7 @@ async def create_job(
             raise ValueError
     except (ValueError, TypeError):
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="bbox must be a JSON array of 4 integers: [x, y, width, height]",
         )
 
@@ -82,7 +84,9 @@ async def get_job(
     )
     job = result.scalar_one_or_none()
     if not job:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"
+        )
 
     return JobResponse(id=job.id, status=job.status.value, created_at=job.created_at)
 
@@ -98,7 +102,9 @@ async def get_job_result(
     )
     job = result.scalar_one_or_none()
     if not job:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Job not found"
+        )
 
     if job.status != JobStatus.COMPLETED:
         return JobResultResponse(
@@ -126,11 +132,15 @@ async def get_job_video(
     )
     job = result.scalar_one_or_none()
     if not job or job.status != JobStatus.COMPLETED or not job.result_path:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not available")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video not available"
+        )
 
     video_path = Path("/app") / job.result_path
     if not video_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video file not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Video file not found"
+        )
 
     return FileResponse(str(video_path), media_type="video/mp4")
 
@@ -146,10 +156,16 @@ async def get_job_centroids(
     )
     job = result.scalar_one_or_none()
     if not job or job.status != JobStatus.COMPLETED:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Centroids not available")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Centroids not available"
+        )
 
-    centroids_path = Path("/app") / job.result_path.replace("output.mp4", "centroids.csv")
+    centroids_path = Path("/app") / job.result_path.replace(
+        "output.mp4", "centroids.csv"
+    )
     if not centroids_path.exists():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Centroids file not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Centroids file not found"
+        )
 
     return FileResponse(str(centroids_path), media_type="text/csv")
