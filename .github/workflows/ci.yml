@@ -25,3 +25,9 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+        env:
+          DATABASE_URL: postgresql+asyncpg://placeholder:placeholder@localhost:5432/placeholder
+          REDIS_URL: redis://localhost:6379/0
+          POSTGRES_USER: placeholder
+          POSTGRES_PASSWORD: placeholder
+          POSTGRES_DB: placeholder
