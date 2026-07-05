@@ -1,7 +1,9 @@
 import csv
 import json
+import tempfile
 from pathlib import Path
 
+import boto3
 import cv2
 from celery import Task
 from sqlalchemy import create_engine
@@ -19,13 +21,15 @@ from plate_tracker import (
 )
 from worker.celery_app import celery_app
 
-# Sync engine — Celery tasks are synchronous
 _sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
 engine = create_engine(_sync_url)
 SessionLocal = sessionmaker(bind=engine)
 
 OUTPUT_DIR = Path("data/output")
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _s3():
+    return boto3.client("s3", region_name=settings.aws_region)
 
 
 @celery_app.task(bind=True, name="worker.tasks.process_job")
@@ -42,9 +46,16 @@ def process_job(self: Task, job_id: str) -> None:
         bbox = tuple(json.loads(job.bbox))
         scale = compute_scale(bbox)
 
-        cap = cv2.VideoCapture(job.video_path)
+        if settings.s3_bucket:
+            with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+                _s3().download_fileobj(settings.s3_bucket, job.video_path, tmp)
+                input_path = tmp.name
+        else:
+            input_path = job.video_path
+
+        cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
-            raise RuntimeError(f"Could not open video: {job.video_path}")
+            raise RuntimeError(f"Could not open video: {input_path}")
 
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -56,12 +67,17 @@ def process_job(self: Task, job_id: str) -> None:
 
         tracker = init_tracker(first_frame, bbox)
 
-        job_output_dir = OUTPUT_DIR / job_id
-        job_output_dir.mkdir(parents=True, exist_ok=True)
+        if settings.s3_bucket:
+            tmp_out = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+            output_path = tmp_out.name
+            tmp_out.close()
+        else:
+            job_output_dir = OUTPUT_DIR / job_id
+            job_output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(job_output_dir / "output.mp4")
 
-        output_video_path = job_output_dir / "output.mp4"
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        writer = cv2.VideoWriter(str(output_video_path), fourcc, fps, (width, height))
+        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
 
         centroids: list[tuple[float, float]] = []
         writer.write(first_frame)
@@ -83,15 +99,32 @@ def process_job(self: Task, job_id: str) -> None:
         cap.release()
         writer.release()
 
-        centroids_path = job_output_dir / "centroids.csv"
-        with open(centroids_path, "w", newline="") as f:
-            csv_writer = csv.writer(f)
-            csv_writer.writerow(["frame", "cx", "cy"])
+        if settings.s3_bucket:
+            tmp_csv = tempfile.NamedTemporaryFile(
+                suffix=".csv", delete=False, mode="w", newline=""
+            )
+            csv_path = tmp_csv.name
+        else:
+            csv_path = output_path.replace("output.mp4", "centroids.csv")
+
+        with open(csv_path, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["frame", "cx", "cy"])
             for i, (cx, cy) in enumerate(centroids):
-                csv_writer.writerow([i, cx, cy])
+                w.writerow([i, cx, cy])
+
+        if settings.s3_bucket:
+            result_video_key = f"results/{job_id}/output.mp4"
+            result_csv_key = f"results/{job_id}/centroids.csv"
+            s3 = _s3()
+            s3.upload_file(output_path, settings.s3_bucket, result_video_key)
+            s3.upload_file(csv_path, settings.s3_bucket, result_csv_key)
+            result_path = result_video_key
+        else:
+            result_path = output_path
 
         job.status = JobStatus.COMPLETED
-        job.result_path = str(output_video_path)
+        job.result_path = result_path
         db.commit()
 
     except Exception as exc:

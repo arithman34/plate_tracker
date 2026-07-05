@@ -2,12 +2,14 @@ import json
 import uuid
 from pathlib import Path
 
+import boto3
 from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from api.core.database import get_db
+from api.core.settings import settings
 from api.models import APIKey, Job, User
 from api.models.job import JobStatus
 from api.schemas.jobs import JobCreateRequest, JobResponse, JobResultResponse
@@ -17,7 +19,10 @@ from worker.celery_app import celery_app
 router = APIRouter(prefix="/jobs", tags=["Jobs"])
 
 UPLOAD_DIR = Path("data/uploads")
-UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _s3():
+    return boto3.client("s3", region_name=settings.aws_region)
 
 
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
@@ -52,14 +57,21 @@ async def create_job(
         )
 
     job_id = str(uuid.uuid4())
-    video_path = UPLOAD_DIR / f"{job_id}_{video.filename}"
-    with open(video_path, "wb") as f:
-        f.write(await video.read())
+
+    if settings.s3_bucket:
+        video_path = f"uploads/{job_id}/{video.filename}"
+        _s3().upload_fileobj(video.file, settings.s3_bucket, video_path)
+    else:
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        local_path = UPLOAD_DIR / f"{job_id}_{video.filename}"
+        with open(local_path, "wb") as f:
+            f.write(await video.read())
+        video_path = str(local_path)
 
     job = Job(
         id=job_id,
         user_id=api_key.user_id,
-        video_path=str(video_path),
+        video_path=video_path,
         bbox=bbox,
         mass_kg=mass_kg,
         status=JobStatus.PENDING,
@@ -126,7 +138,7 @@ async def get_job_video(
     job_id: str,
     api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
-) -> FileResponse:
+) -> Response:
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == api_key.user_id)
     )
@@ -136,13 +148,15 @@ async def get_job_video(
             status_code=status.HTTP_404_NOT_FOUND, detail="Video not available"
         )
 
-    video_path = Path("/app") / job.result_path
-    if not video_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Video file not found"
+    if settings.s3_bucket:
+        url = _s3().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.s3_bucket, "Key": job.result_path},
+            ExpiresIn=3600,
         )
+        return RedirectResponse(url)
 
-    return FileResponse(str(video_path), media_type="video/mp4")
+    return FileResponse(job.result_path, media_type="video/mp4")
 
 
 @router.get("/{job_id}/centroids")
@@ -150,22 +164,24 @@ async def get_job_centroids(
     job_id: str,
     api_key: APIKey = Depends(verify_api_key),
     db: AsyncSession = Depends(get_db),
-) -> FileResponse:
+) -> Response:
     result = await db.execute(
         select(Job).where(Job.id == job_id, Job.user_id == api_key.user_id)
     )
     job = result.scalar_one_or_none()
-    if not job or job.status != JobStatus.COMPLETED:
+    if not job or job.status != JobStatus.COMPLETED or not job.result_path:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Centroids not available"
         )
 
-    centroids_path = Path("/app") / job.result_path.replace(
-        "output.mp4", "centroids.csv"
-    )
-    if not centroids_path.exists():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Centroids file not found"
+    if settings.s3_bucket:
+        centroids_key = job.result_path.replace("output.mp4", "centroids.csv")
+        url = _s3().generate_presigned_url(
+            "get_object",
+            Params={"Bucket": settings.s3_bucket, "Key": centroids_key},
+            ExpiresIn=3600,
         )
+        return RedirectResponse(url)
 
-    return FileResponse(str(centroids_path), media_type="text/csv")
+    centroids_path = job.result_path.replace("output.mp4", "centroids.csv")
+    return FileResponse(centroids_path, media_type="text/csv")

@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     postgres_user: str
     postgres_password: str
     postgres_db: str
+    s3_bucket: str | None = None
+    aws_region: str = "eu-west-2"
 
 
 settings = Settings()
