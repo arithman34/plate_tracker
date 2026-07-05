@@ -31,3 +31,4 @@ jobs:
           POSTGRES_USER: placeholder
           POSTGRES_PASSWORD: placeholder
           POSTGRES_DB: placeholder
+          AWS_REGION: eu-west-2

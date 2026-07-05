@@ -22,6 +22,8 @@ locals {
     { name = "POSTGRES_USER", value = var.db_username },
     { name = "POSTGRES_PASSWORD", value = var.db_password },
     { name = "POSTGRES_DB", value = "plate_tracker" },
+    { name = "S3_BUCKET", value = aws_s3_bucket.media.id },
+    { name = "AWS_REGION", value = var.aws_region },
   ]
 }
 
