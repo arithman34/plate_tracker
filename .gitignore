@@ -3,3 +3,9 @@ __pycache__/
 .ipynb_checkpoints/
 .env
 /data/uploads
+.aws/
+*.csv
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/*.tfvars
