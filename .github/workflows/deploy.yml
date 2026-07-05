@@ -1,0 +1,40 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  AWS_REGION: eu-west-2
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-2.amazonaws.com
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push API image
+        run: |
+          docker build -f Dockerfile.api -t $ECR_REGISTRY/plate-tracker-api:latest .
+          docker push $ECR_REGISTRY/plate-tracker-api:latest
+
+      - name: Build and push worker image
+        run: |
+          docker build -f Dockerfile.worker -t $ECR_REGISTRY/plate-tracker-worker:latest .
+          docker push $ECR_REGISTRY/plate-tracker-worker:latest
+
+      - name: Deploy to ECS
+        run: |
+          aws ecs update-service --cluster plate-tracker --service plate-tracker-api --force-new-deployment
+          aws ecs update-service --cluster plate-tracker --service plate-tracker-worker --force-new-deployment
