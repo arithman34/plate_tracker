@@ -2,7 +2,9 @@
 
 A barbell velocity tracker that analyses lift videos and computes real-time kinematics — velocity, acceleration, force, and power — by tracking the plate across frames using computer vision.
 
-**API docs:** [plate-tracker.arithman.dev/docs](https://plate-tracker.arithman.dev/docs)
+![Annotated squat tracking output showing plate trail and live velocity/acceleration/force/power metrics](docs/assets/demo.gif)
+
+v1 prototype (YOLO-based plate detection) is archived at [arithman34/plate-detection](https://github.com/arithman34/plate-detection).
 
 
 ## How it works
@@ -21,19 +23,31 @@ A barbell velocity tracker that analyses lift videos and computes real-time kine
 | API | FastAPI + async SQLAlchemy (asyncpg) |
 | Job queue | Celery + Redis |
 | Database | PostgreSQL |
-| Storage | Local filesystem (shared Docker volume) |
-| Deploy | Hetzner VPS, Docker Compose, nginx, Let's Encrypt |
-| CI/CD | GitHub Actions (auto-deploy on push to `main`) |
+| Storage | S3-backed (presigned URLs) |
+| Deploy | Railway (api, worker, Postgres, Redis) |
+| CI/CD | GitHub Actions (tests) + Railway auto-deploy on push to `main` |
 | Auth | SHA-256 hashed API keys, credit system |
 
-AWS infrastructure (ECS Fargate, RDS, ElastiCache, ALB, ECR, S3) is defined in `terraform/` and kept for portfolio reference — the live deployment runs on Hetzner for cost effectiveness.
+AWS infrastructure (ECS Fargate, RDS, ElastiCache, ALB, ECR, S3) is defined in `terraform/` and kept for portfolio reference — see [terraform/README.md](terraform/README.md).
+
+## Deployment (Railway)
+
+1. Create a Railway project and add **Postgres** and **Redis** plugins.
+2. Add an **api** service from this repo, set its config-as-code path to `railway.api.toml`.
+3. Add a **worker** service from this repo, set its config-as-code path to `railway.worker.toml`.
+4. On both services, set the shared env vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `REDIS_URL=${{Redis.REDIS_URL}}`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `S3_BUCKET`, `AWS_REGION`, plus your AWS credentials for S3 access.
+5. Push to `main` — Railway's GitHub integration builds and deploys both services automatically.
+
+`DATABASE_URL` is normalized to the `asyncpg` driver automatically (see [api/core/settings.py](api/core/settings.py)), so Railway's default `postgres://` connection string works as-is.
 
 ## API
+
+Set `API_URL` to your deployed Railway domain (or `http://localhost:8000` for local dev).
 
 ### Register
 
 ```bash
-curl -X POST https://plate-tracker.arithman.dev/api/v1/auth/register \
+curl -X POST $API_URL/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email": "you@example.com"}'
 ```
@@ -45,7 +59,7 @@ Returns an API key — store it, it won't be shown again.
 `bbox` is `[x, y, width, height]` of the plate in the first frame.
 
 ```bash
-curl -X POST https://plate-tracker.arithman.dev/api/v1/jobs \
+curl -X POST $API_URL/api/v1/jobs \
   -H "X-API-Key: <your-key>" \
   -F "video=@squat.mp4" \
   -F 'bbox=[361, 14, 270, 287]' \
@@ -55,7 +69,7 @@ curl -X POST https://plate-tracker.arithman.dev/api/v1/jobs \
 ### Poll for status
 
 ```bash
-curl https://plate-tracker.arithman.dev/api/v1/jobs/<job-id> \
+curl $API_URL/api/v1/jobs/<job-id> \
   -H "X-API-Key: <your-key>"
 ```
 
@@ -65,11 +79,11 @@ Status: `pending` -> `processing` -> `completed` / `failed`
 
 ```bash
 # Annotated video
-curl https://plate-tracker.arithman.dev/api/v1/jobs/<job-id>/video \
+curl $API_URL/api/v1/jobs/<job-id>/video \
   -H "X-API-Key: <your-key>" -o output.mp4
 
 # Centroid CSV (frame, cx, cy)
-curl https://plate-tracker.arithman.dev/api/v1/jobs/<job-id>/centroids \
+curl $API_URL/api/v1/jobs/<job-id>/centroids \
   -H "X-API-Key: <your-key>" -o centroids.csv
 ```
 
