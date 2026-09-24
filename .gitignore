@@ -10,3 +10,4 @@ terraform/terraform.tfstate
 terraform/terraform.tfstate.backup
 terraform/*.tfvars
 terraform/tfplan
+node_modules/

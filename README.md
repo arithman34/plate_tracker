@@ -4,6 +4,8 @@ A barbell velocity tracker that analyses lift videos and computes real-time kine
 
 ![Annotated squat tracking output showing plate trail and live velocity/acceleration/force/power metrics](docs/assets/demo.gif)
 
+**Live API:** [api-production-3909.up.railway.app](https://api-production-3909.up.railway.app) ([health check](https://api-production-3909.up.railway.app/health))
+
 v1 prototype (YOLO-based plate detection) is archived at [arithman34/plate-detection](https://github.com/arithman34/plate-detection).
 
 
@@ -32,17 +34,27 @@ AWS infrastructure (ECS Fargate, RDS, ElastiCache, ALB, ECR, S3) is defined in `
 
 ## Deployment (Railway)
 
-1. Create a Railway project and add **Postgres** and **Redis** plugins.
-2. Add an **api** service from this repo, set its config-as-code path to `railway.api.toml`.
-3. Add a **worker** service from this repo, set its config-as-code path to `railway.worker.toml`.
-4. On both services, set the shared env vars: `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `REDIS_URL=${{Redis.REDIS_URL}}`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`, `S3_BUCKET`, `AWS_REGION`, plus your AWS credentials for S3 access.
-5. Push to `main` — Railway's GitHub integration builds and deploys both services automatically.
+Infrastructure is defined as code in [`.railway/railway.ts`](.railway/railway.ts) using Railway's IaC SDK: Postgres, Redis, and the api/worker services (built from `Dockerfile.api`/`Dockerfile.worker`), wired together with generated variable references (`DATABASE_URL`, `REDIS_URL`, `POSTGRES_*`).
+
+```bash
+railway login
+railway link                # link to the Railway project
+npm install railway         # pulls in the IaC SDK used by .railway/railway.ts
+railway config plan         # preview changes
+railway config apply --yes  # apply
+```
+
+AWS credentials for S3 (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, `S3_BUCKET`) are set once via `railway variable set` and preserved across applies (see `preserve()` in `.railway/railway.ts`) — they aren't stored in the IaC file itself. Once services are healthy, expose the api publicly with `railway domain --service api --port 8080`.
+
+Pushing to `main` triggers Railway's own GitHub-integration rebuild for both services automatically.
 
 `DATABASE_URL` is normalized to the `asyncpg` driver automatically (see [api/core/settings.py](api/core/settings.py)), so Railway's default `postgres://` connection string works as-is.
 
 ## API
 
-Set `API_URL` to your deployed Railway domain (or `http://localhost:8000` for local dev).
+```bash
+API_URL=https://api-production-3909.up.railway.app  # or http://localhost:8000 for local dev
+```
 
 ### Register
 
