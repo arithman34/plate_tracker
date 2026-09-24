@@ -4,7 +4,7 @@ A barbell velocity tracker that analyses lift videos and computes real-time kine
 
 ![Annotated squat tracking output showing plate trail and live velocity/acceleration/force/power metrics](docs/assets/demo.gif)
 
-**Live API:** [api-production-3909.up.railway.app](https://api-production-3909.up.railway.app) ([health check](https://api-production-3909.up.railway.app/health))
+**API docs:** [api-production-3909.up.railway.app/docs](https://api-production-3909.up.railway.app/docs) ([health check](https://api-production-3909.up.railway.app/health))
 
 v1 prototype (YOLO-based plate detection) is archived at [arithman34/plate-detection](https://github.com/arithman34/plate-detection).
 
